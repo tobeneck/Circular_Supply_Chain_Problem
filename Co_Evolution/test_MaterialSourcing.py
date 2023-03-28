@@ -16,7 +16,7 @@ n_suppliers = 3
 
 Moq = [[15, 2, 1],
         [10, 3, 2]]
-Cap = [[100, 20, 0],
+Cap = [[100, 20, 30],
         [70, 30, 50]]
 Mp  = [[2, 2.5, 3],
         [2, 2.5, 2.5]]
@@ -33,7 +33,7 @@ Mc = np.array(Mc)
 Sp = np.array(Sp)
 
 
-materials_needed = [50, 50]
+production_plan = [10, 5] #how many of product 1 and p3odict 2 to produce
 
 problem = MaterialSourcing_Problem(n_materials,
                 n_suppliers,
@@ -42,7 +42,10 @@ problem = MaterialSourcing_Problem(n_materials,
                 Cap,
                 Mp,
                 Type,
-                materials_needed
+                production_plan,
+                Mc,
+                Sp,
+                F
                 )
 
 
@@ -51,7 +54,7 @@ problem = MaterialSourcing_Problem(n_materials,
 #sampler = Sampling_Lower()
 
 
-algorithm = NSGA2(pop_size=10,
+algorithm = NSGA2(pop_size=100,
                   sampling=MaterialSourcing_Sampling(),
                   crossover=MaterialSourcing_Crossover(material_blocks = problem.material_at_gene),
                   mutation=MaterialSourcing_Mutation(material_blocks = problem.material_at_gene),
@@ -59,14 +62,26 @@ algorithm = NSGA2(pop_size=10,
 
 res = minimize(problem,
                algorithm,
-               ('n_gen', 20),
+               ('n_gen', 200),
                seed=1,
                verbose=False)
 
 
+
 print(res.algorithm.pop.get("X"))
-print(res.algorithm.pop.get("F"))
-exit()
+#fitness = res.algorithm.pop.get("F") * -1
+fitness = res.opt.get("F") * -1
+
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+df = pd.DataFrame(fitness, columns = ['f_1','f_2'])
+ax1 = df.plot.scatter(x='f_2',
+                      y='f_1',
+                      c='DarkBlue')
+plt.show()
 #dummy population
 x = [
     [0,1,2,3,4 ,5],
@@ -75,5 +90,5 @@ x = [
 ]
 x = np.array(x)
 
-print(problem.f1(x))
-print(problem.f2(x))
+print(problem.f1(x) * -1)
+print(problem.f2(x) * -1)

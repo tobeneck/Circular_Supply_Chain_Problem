@@ -3,7 +3,7 @@ from pymoo.core.problem import Problem
 
 class MaterialSourcing_Problem(Problem):
 
-    def __init__(self, n_materials, n_suppliers, n_products, Moq, Cap, Mp, Source_Type, materials_needed):
+    def __init__(self, n_materials, n_suppliers, n_products, Moq, Cap, Mp, Source_Type, production_plan, Mc, Sp, F):
         '''
         Parameters:
         n_materials : int
@@ -20,8 +20,14 @@ class MaterialSourcing_Problem(Problem):
             The price for each material (row) at each supplier (column).
         Type : numpy.array (2D)
             The material type for each material (row) at each supplier (column). False if virgin material, True if recycled material.
-        materials_needed : numpy_array (2D)
-            Vector containing for each material how much is needed in the current production plan.
+        production_plan : numpy_array (2D)
+            Vector containing for each product how much is be produced. This determines the profit and what materials need to be sourced.
+        Mc : numpy.array (2D)
+            The material (column) cost of each product (row).
+        Sp : numpy.array
+            The sale price of each product.
+        F : number
+            The fixed cost.
 
         '''
 
@@ -35,21 +41,19 @@ class MaterialSourcing_Problem(Problem):
         self.Moq = np.delete(np.ravel( Moq ), cap_zero_indices)
         self.Mp = np.delete(np.ravel( Mp ), cap_zero_indices)
         self.Source_Type = np.delete(np.ravel( Source_Type ), cap_zero_indices)
-        
-        self.materials_needed = materials_needed
 
         self.material_at_gene = np.array( [np.ones(n_suppliers)*(i+1) for i in range(n_materials)] ) #contains for each gene to which material it corresponds
         self.material_at_gene = np.delete( np.ravel( self.material_at_gene ), cap_zero_indices)
         
         self.supplier_at_gene = np.array( [np.arange(start=1, stop=n_suppliers+1) for i in range(n_materials)] ) #contains for each gene to which supplier it corresponds
         self.supplier_at_gene = np.delete( np.ravel( self.supplier_at_gene ), cap_zero_indices)
-
-        print(self.material_at_gene)
-        print(self.supplier_at_gene)
-        print(self.Moq)
-        print(self.Cap)
-        print(self.Mp)
         
+        #calculate profit for the production plan after the fixed cost
+        income = production_plan * Sp
+        self.profit = income.sum() - F
+
+        #calculate the materials needed for the production plan
+        self.materials_needed = (production_plan * Mc).sum(axis=1)
 
         xl = np.zeros( len(self.Cap) )
         xu = self.Cap
@@ -59,12 +63,12 @@ class MaterialSourcing_Problem(Problem):
                 xl=xl,
                 xu=xu
                 )
-        
-
+    
 
     def f2(self, x):
         '''
-        Returns the second objective for the lower population, which is the ratio of virgin materials purchaced (to be minimized).
+        Calculates the second objective, which is the ratio of recycled material used in production.
+        As this would be a maximization problem, the ratio is returned as a negative number.
 
         Parameters:
         -----------
@@ -73,29 +77,30 @@ class MaterialSourcing_Problem(Problem):
 
         Returns:
         --------
-        cost : np.array
-            The cost for purchasing all materials.
+        inverted_recycled_material_ratio : np.array
+            The ratio of recycled material used in production *-1 to make it a minimization problem.
         '''
 
-        all_material_sourcing = x
+        all_material_sourcing = x[:,:len(self.Mp)]
 
-        recycled_sources = np.where(self.Source_Type == True)
-        virgin_material_sourcing = np.delete(all_material_sourcing, recycled_sources, axis=1)
+        virgin_material_sources = np.where(self.Source_Type == False)
+        recycled_material_sourcing = np.delete(all_material_sourcing, virgin_material_sources, axis=1)
 
         all_material = all_material_sourcing.sum(axis=1)
-        virgin_material = virgin_material_sourcing.sum(axis=1)
+        recycled_material = recycled_material_sourcing.sum(axis=1)
 
-        #replace all zero values with one to avoid dividing by zero. By replacing only the denominator the result will still be zero. Not buying any material is considered to be maximally sustainable.
+        #replace all zero values with ones to avoid dividing by zero. Not buying any material is considered to be maximally sustainable.
         nothing_bought = np.where(all_material == 0)
         all_material[nothing_bought] = 1
+        recycled_material[nothing_bought] = 1
 
-        virgin_material_ratio = virgin_material / all_material
+        recycled_material_ratio = recycled_material / all_material
 
-        return virgin_material_ratio
+        return recycled_material_ratio * -1
 
     def f1(self, x):
         '''
-        Returns the first objective for the lower population, which is the cost of the purchace for all materials (to be minimized).
+        Returns the first objective, the profit.
 
         Parameters:
         -----------
@@ -104,19 +109,19 @@ class MaterialSourcing_Problem(Problem):
 
         Returns:
         --------
-        cost : np.array
-            The cost for purchasing all materials.
+        income : np.array
+            The income generated from selling the product.
         '''
         pop_size = len(x)
 
         #calculate cost
+        material_sourcing = x[:,:len(self.Mp)]
         Mp = np.full( (pop_size, len(self.Mp)), self.Mp )
-        cost = x * Mp
+        cost = material_sourcing * Mp
         cost = cost.sum(axis=1)
         
-        return cost
+        return (self.profit - cost) * -1
         
-
 
 
     def _evaluate(self, x, out, *args, **kwargs):
