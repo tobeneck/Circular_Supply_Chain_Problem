@@ -1,8 +1,36 @@
 import numpy as np
 from pymoo.core.problem import Problem
 
-class CSCP(Problem): #Circular Supply Chain Optimization Problem
+class CSC(Problem):
 
+
+    def get_material_market_cap(self):
+        '''
+        Returns for each material how much of it can be purchaced on the whole market (all suppliers).
+
+        Parameters:
+        -----------
+        n_products : int
+            The number of products that can be produced.
+        Cap : np.array (2D)
+            The the production capacity, or maximum order quantity, for each material (row) at each supplier (column).
+        material_at_gene : numpy_array (2D)
+            Array containing for each possible purchace in Cap to which material it belongs.
+
+        Returns:
+        --------
+        material_market_cap : np.array
+            Array containining for each material how much can be porchaced at the market.
+        '''
+
+        material_market_cap = np.zeros(self.n_products)
+
+        for product_index in range(self.n_products):
+            current_product_indices = np.where(self.material_at_gene == product_index + 1)[0]
+            material_market_cap[product_index] = self.Cap[current_product_indices].sum()
+
+        return material_market_cap
+    
     def xu_of_products(self, Cap, Mc):
         '''
         Returns per product the theoretical maximum that could be produced (if no other product would be pdoruced).
@@ -34,29 +62,6 @@ class CSCP(Problem): #Circular Supply Chain Optimization Problem
             xu_products.append(current_upper_limit)
         
         return xu_products
-
-    def get_absolute_material_values(self, x):
-        '''
-        Parameters:
-        -----------
-        x : numpy_array
-            The population for which the absolute material needs need to be returned.
-        
-        Returns:
-        --------
-        abs_x : numpy_array
-            The population with absolute purchace values instead of relative values.
-        '''
-        #TODO: calculate the absolute meterial need for a product plan
-
-
-        #TODO 1. calculate a material needs vector from the amount of product neccecary
-
-        pass
-    
-    def get_relative_material_values(self):
-        #TODO: calculate the relative buying values of materials
-        pass
 
     def __init__(self, n_materials, n_suppliers, n_products, Moq, Cap, Mp, Type, Mc, Sp, F):
         '''
@@ -97,14 +102,20 @@ class CSCP(Problem): #Circular Supply Chain Optimization Problem
         self.Moq = np.delete(np.ravel( Moq ), cap_zero_indices)
         self.Mp = np.delete(np.ravel( Mp ), cap_zero_indices)
         self.Type = np.delete(np.ravel( Type ), cap_zero_indices)
-        self.Mc = np.delete(np.ravel( Mc ), cap_zero_indices)
 
         self.Sp = Sp
+        self.Mc = Mc
+
+        self.material_at_gene = np.array( [np.ones(n_suppliers)*(i+1) for i in range(n_materials)] ) #contains for each gene to which material it corresponds
+        self.material_at_gene = np.delete( np.ravel( self.material_at_gene ), cap_zero_indices)
+
+        self.supplier_at_gene = np.array( [np.arange(start=1, stop=n_suppliers+1) for i in range(n_materials)] ) #contains for each gene to which supplier it corresponds
+        self.supplier_at_gene = np.delete( np.ravel( self.supplier_at_gene ), cap_zero_indices)
         
 
         xl = np.zeros(len(self.Cap) + n_products )
-        xu = self.Cap
-        xu = np.append(xu, self.xu_of_products(Cap, Mc))
+        xu = self.Cap #he limits of each supplier
+        xu = np.append(xu, self.xu_of_products(Cap, Mc)) #the theoretical maximum of each product that can be produced
 
         super().__init__(n_var=np.count_nonzero(Cap) + self.n_products,
                 n_obj=2,
@@ -115,27 +126,41 @@ class CSCP(Problem): #Circular Supply Chain Optimization Problem
 
 
     def f2(self, x):
+        '''
+        Returns the second objective, modelling the sustainability (/percentage of recycled material used in production).
+        Multiplied by -1 to make it a minimization problem.
+
+        Parameters:
+        -----------
+        x : np.array()
+            The population to be evaluated.
+
+        Returns:
+        --------
+        virgin_material_ratio : np.array
+            The ratio of virgin materials used in production. Should be minimized.
+        '''
 
         all_material_sourcing = x[:,:len(self.Mp)]
 
-        virgin_sources = np.where(self.Type == False)
-        virgin_material_sourcing = np.delete(all_material_sourcing, virgin_sources, axis=1)
+        virgin__sources = np.where(self.Type == False)
+        recycled_material_sourcing = np.delete(all_material_sourcing, virgin__sources, axis=1)
 
         all_material = all_material_sourcing.sum(axis=1)
-        virgin_material = virgin_material_sourcing.sum(axis=1)
+        recycled_material = recycled_material_sourcing.sum(axis=1)
 
         #replace all zero values with ones to avoid dividing by zero. Not buying any material is considered to be maximally sustainable.
         nothing_bought = np.where(all_material == 0)
         all_material[nothing_bought] = 1
-        virgin_material[nothing_bought] = 1
+        recycled_material[nothing_bought] = 1
 
-        virgin_material_ratio = virgin_material / all_material
+        recycled_material_ratio = recycled_material / all_material
 
-        return virgin_material_ratio
+        return recycled_material_ratio * -1
 
     def f1(self, x):
         '''
-        Returns the first objective, the profit.
+        Returns the first objective, modelling the profit.
 
         Parameters:
         -----------
@@ -163,15 +188,13 @@ class CSCP(Problem): #Circular Supply Chain Optimization Problem
         cost = cost.sum(axis=1)
         print(cost)
         
-        return profit - cost
+        return (profit - cost) * -1
         
 
 
 
     def _evaluate(self, x, out, *args, **kwargs):
-        #TODO: calc f_1
         f1 = self.f1(x)
-        #TODO: calc f_2
-        f2 = (x[:, 0]-1)**2 + x[:, 1]**2
+        f2 = self.f2(x)
         out["F"] = np.column_stack([f1, f2])
 
